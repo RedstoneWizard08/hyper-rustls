@@ -7,13 +7,18 @@
 
 #![cfg(feature = "acceptor")]
 
+use std::net::SocketAddr;
 use std::vec::Vec;
 use std::{env, fs, io};
 
-use hyper::server::conn::AddrIncoming;
-use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Method, Request, Response, Server, StatusCode};
+use http::{Method, Request, Response, StatusCode};
+use http_body_util::{BodyExt, Full};
+use hyper::body::{Bytes, Incoming};
+use hyper::service::service_fn;
 use hyper_rustls::TlsAcceptor;
+use hyper_util::rt::TokioExecutor;
+use hyper_util::server::conn::auto::Builder;
+use tokio::net::TcpListener;
 
 fn main() {
     // Serve an echo service over HTTPS, with proper error handling.
@@ -34,7 +39,7 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Some(ref p) => p.to_owned(),
         None => "1337".to_owned(),
     };
-    let addr = format!("127.0.0.1:{}", port).parse()?;
+    let addr: SocketAddr = format!("127.0.0.1:{}", port).parse()?;
 
     // Load public certificate.
     let certs = load_certs("examples/sample.pem")?;
@@ -43,33 +48,43 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Build TLS configuration.
 
     // Create a TCP listener via tokio.
-    let incoming = AddrIncoming::bind(&addr)?;
-    let acceptor = TlsAcceptor::builder()
+    let incoming = TcpListener::bind(&addr).await?;
+    let mut acceptor = TlsAcceptor::builder()
         .with_single_cert(certs, key)
         .map_err(|e| error(format!("{}", e)))?
         .with_all_versions_alpn()
         .with_incoming(incoming);
-    let service = make_service_fn(|_| async { Ok::<_, io::Error>(service_fn(echo)) });
-    let server = Server::builder(acceptor).serve(service);
 
-    // Run the future, keep going until an error occurs.
-    println!("Starting to serve on https://{}.", addr);
-    server.await?;
-    Ok(())
+    let service = service_fn(echo);
+
+    loop {
+        let (tcp_stream, _remote_addr) = acceptor.accept().await.unwrap();
+        if let Err(err) = Builder::new(TokioExecutor::new())
+            .serve_connection(tcp_stream, service)
+            .await
+        {
+            eprintln!("failed to serve connection: {err:#}");
+        }
+    }
 }
 
 // Custom echo service, handling two different routes and a
 // catch-all 404 responder.
-async fn echo(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
-    let mut response = Response::new(Body::empty());
+async fn echo(req: Request<Incoming>) -> Result<Response<Full<Bytes>>, hyper::Error> {
+    let mut response = Response::new(Full::default());
     match (req.method(), req.uri().path()) {
         // Help route.
         (&Method::GET, "/") => {
-            *response.body_mut() = Body::from("Try POST /echo\n");
+            *response.body_mut() = Full::from("Try POST /echo\n");
         }
         // Echo service route.
         (&Method::POST, "/echo") => {
-            *response.body_mut() = req.into_body();
+            *response.body_mut() = Full::from(
+                req.into_body()
+                    .collect()
+                    .await?
+                    .to_bytes(),
+            );
         }
         // Catch-all 404.
         _ => {

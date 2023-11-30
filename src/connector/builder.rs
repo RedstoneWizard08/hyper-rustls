@@ -3,9 +3,7 @@ use rustls::ClientConfig;
 use super::HttpsConnector;
 #[cfg(any(feature = "rustls-native-certs", feature = "webpki-roots"))]
 use crate::config::ConfigBuilderExt;
-
-#[cfg(feature = "tokio-runtime")]
-use hyper::client::HttpConnector;
+use hyper_util::client::legacy::connect::HttpConnector;
 
 /// A builder for an [`HttpsConnector`]
 ///
@@ -17,7 +15,7 @@ use hyper::client::HttpConnector;
 /// ```
 /// use hyper_rustls::HttpsConnectorBuilder;
 ///
-/// # #[cfg(all(feature = "webpki-roots", feature = "tokio-runtime", feature = "http1"))]
+/// # #[cfg(all(feature = "webpki-roots", feature = "http1"))]
 /// let https = HttpsConnectorBuilder::new()
 ///     .with_webpki_roots()
 ///     .https_only()
@@ -143,7 +141,6 @@ impl WantsProtocols1 {
         }
     }
 
-    #[cfg(feature = "tokio-runtime")]
     fn build(self) -> HttpsConnector<HttpConnector> {
         let mut http = HttpConnector::new();
         // HttpConnector won't enforce scheme, but HttpsConnector will
@@ -233,7 +230,6 @@ impl ConnectorBuilder<WantsProtocols2> {
     }
 
     /// This builds an [`HttpsConnector`] built on hyper's default [`HttpConnector`]
-    #[cfg(feature = "tokio-runtime")]
     pub fn build(self) -> HttpsConnector<HttpConnector> {
         self.0.inner.build()
     }
@@ -264,7 +260,6 @@ pub struct WantsProtocols3 {
 #[cfg(feature = "http2")]
 impl ConnectorBuilder<WantsProtocols3> {
     /// This builds an [`HttpsConnector`] built on hyper's default [`HttpConnector`]
-    #[cfg(feature = "tokio-runtime")]
     pub fn build(self) -> HttpsConnector<HttpConnector> {
         self.0.inner.build()
     }
@@ -331,12 +326,13 @@ mod tests {
             .enable_http2()
             .build();
         assert_eq!(&connector.tls_config.alpn_protocols, &[b"h2".to_vec()]);
-        let connector = super::ConnectorBuilder::new()
-            .with_tls_config(tls_config.clone())
-            .https_only()
-            .enable_http1()
-            .enable_http2()
-            .build();
+        let connector =
+            super::ConnectorBuilder::new()
+                .with_tls_config(tls_config.clone())
+                .https_only()
+                .enable_http1()
+                .enable_http2()
+                .build();
         assert_eq!(
             &connector.tls_config.alpn_protocols,
             &[b"h2".to_vec(), b"http/1.1".to_vec()]

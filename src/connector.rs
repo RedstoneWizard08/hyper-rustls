@@ -4,9 +4,11 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::{fmt, io};
 
-use hyper::{client::connect::Connection, service::Service, Uri};
-use tokio::io::{AsyncRead, AsyncWrite};
+use http::Uri;
+use hyper::rt::{Read, Write};
+use hyper_util::rt::TokioIo;
 use tokio_rustls::TlsConnector;
+use tower_service::Service;
 
 use crate::stream::MaybeHttpsStream;
 
@@ -57,7 +59,7 @@ where
 impl<T> Service<Uri> for HttpsConnector<T>
 where
     T: Service<Uri>,
-    T::Response: Connection + AsyncRead + AsyncWrite + Send + Unpin + 'static,
+    T::Response: Read + Write + Send + Unpin + 'static,
     T::Future: Send + 'static,
     T::Error: Into<BoxError>,
 {
@@ -121,10 +123,10 @@ where
                         .map_err(Into::into)?;
                     let connector = TlsConnector::from(cfg);
                     let tls = connector
-                        .connect(hostname, tcp)
+                        .connect(hostname, TokioIo::new(tcp))
                         .await
                         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-                    Ok(MaybeHttpsStream::Https(tls))
+                    Ok(MaybeHttpsStream::Https(TokioIo::new(tls)))
                 };
                 Box::pin(f)
             } else {

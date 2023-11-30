@@ -1,7 +1,6 @@
-use std::sync::Arc;
-
-use hyper::server::conn::AddrIncoming;
 use rustls::ServerConfig;
+use std::sync::Arc;
+use tokio::net::TcpListener;
 
 use super::TlsAcceptor;
 /// Builder for [`TlsAcceptor`]
@@ -87,20 +86,12 @@ impl AcceptorBuilder<WantsAlpn> {
 pub struct WantsIncoming(ServerConfig);
 
 impl AcceptorBuilder<WantsIncoming> {
-    /// Passes a [`AddrIncoming`] to configure the TLS connection and
+    /// Passes a [`TcpListener`] to configure the TLS connection and
     /// creates the [`TlsAcceptor`]
-    pub fn with_incoming(self, incoming: impl Into<AddrIncoming>) -> TlsAcceptor {
-        self.with_acceptor(incoming.into())
-    }
-
-    /// Passes an acceptor implementing [`Accept`] to configure the TLS connection and
-    /// creates the [`TlsAcceptor`]
-    ///
-    /// [`Accept`]: hyper::server::accept::Accept
-    pub fn with_acceptor<A>(self, acceptor: A) -> TlsAcceptor<A> {
+    pub fn with_incoming(self, incoming: impl Into<TcpListener>) -> TlsAcceptor {
         TlsAcceptor {
             config: Arc::new(self.0 .0),
-            acceptor,
+            listener: incoming.into(),
         }
     }
 }
